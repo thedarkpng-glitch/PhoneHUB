@@ -1,0 +1,76 @@
+name: Build PhoneHUB for Windows
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install project and build tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pyinstaller
+
+      - name: Build PhoneHUB.exe (app)
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed --name PhoneHUB --paths src main.py
+
+      - name: Build PhoneHUB-console.exe (diagnostics)
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --console --name PhoneHUB-console --paths src main.py
+
+      
+      - name: Configure release URL for the installer
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/PhoneHUB.exe"
+          [System.IO.File]::WriteAllText("installer/release_url.txt", $url)
+
+
+      - name: Build setup.exe
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name setup --add-data "installer\release_url.txt;." installer\setup_bootstrapper.py
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhoneHUB-Windows-${{ github.ref_name }}
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PhoneHUB ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/PhoneHUB.exe
+            dist/PhoneHUB-console.exe
+            dist/setup.exe
